@@ -89,14 +89,6 @@ Technology Stack
 - Pillow (PIL) - Image processing
 - kafka-python - Kafka client library
 
-Project Files
-
-├── master.py       # Image splitting, task distribution, result aggregation
-├── app.py          # Flask web server and UI endpoints
-├── worker.py       # Tile processing and result publishing
-└── templates/
-    └── index.html  # User interface for uploads and downloads
-
 Course: Big Data - Project 3  
 Institution: PES University  
 Year: 2025
