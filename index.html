@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Image Processing Dashboard</title>
+  <style>
+    body { 
+      font-family: Arial, sans-serif; 
+      margin: 20px; 
+      background-color: #f5f5f5;
+    }
+    h1 { color: #222; }
+    h2 { color: #444; margin-top: 30px; }
+    .container {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    input[type="file"] { margin-top: 10px; }
+    button { 
+      margin-top: 10px; 
+      padding: 10px 15px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover { background-color: #0056b3; }
+    button:disabled { background-color: #ccc; cursor: not-allowed; }
+    #status, #progress { 
+      margin-top: 15px; 
+      padding: 10px;
+      background-color: #e7f3ff;
+      border-left: 4px solid #007bff;
+      border-radius: 4px;
+    }
+    #resultImage { 
+      max-width: 100%; 
+      display: none; 
+      margin-top: 12px;
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    #workersDashboard {
+      background-color: #f0f8ff;
+      border: 2px solid #007bff;
+      border-radius: 4px;
+      padding: 15px;
+      margin-top: 20px;
+    }
+    .worker-item {
+      background-color: white;
+      padding: 10px;
+      margin-bottom: 10px;
+      border-radius: 4px;
+      border-left: 4px solid #28a745;
+    }
+    .worker-item.inactive {
+      border-left-color: #dc3545;
+      opacity: 0.6;
+    }
+    .worker-status {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-right: 8px;
+      background-color: #28a745;
+    }
+    .worker-status.inactive {
+      background-color: #dc3545;
+    }
+    .elapsed-time {
+      font-size: 0.9em;
+      color: #666;
+      margin-left: 10px;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Upload Image for Processing</h1>
+  <form id="uploadForm" enctype="multipart/form-data" method="post">
+    <label>Select image (≥1024×1024): </label><br>
+    <input type="file" id="imageFile" name="image" accept="image/*" required /><br>
+    <button type="submit">Upload and Submit Job</button>
+  </form>
+  <div id="status"></div>
+  <div id="progress"></div>
+</div>
+
+<div class="container">
+  <h2>Job Result</h2>
+  <button id="checkResultBtn" disabled>Download Result</button>
+  <img id="resultImage" alt="Processed Image will appear here" />
+</div>
+
+<div class="container">
+  <h2>Worker Status Dashboard</h2>
+  <div id="workersDashboard">
+    <p>No active workers yet...</p>
+  </div>
+</div>
+
+<script>
+let currentJobId = null;
+const uploadForm = document.getElementById('uploadForm');
+const statusDiv = document.getElementById('status');
+const progressDiv = document.getElementById('progress');
+const resultImg = document.getElementById('resultImage');
+const checkBtn = document.getElementById('checkResultBtn');
+const workersDashboard = document.getElementById('workersDashboard');
+
+uploadForm.addEventListener('submit', function(e) {
+  e.preventDefault();
+  statusDiv.textContent = '';
+  progressDiv.textContent = '';
+  resultImg.style.display = 'none';
+  checkBtn.disabled = true;
+  const formData = new FormData(uploadForm);
+  fetch('/upload', {
+    method: 'POST',
+    body: formData
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.job_id) {
+      currentJobId = data.job_id;
+      statusDiv.textContent = 'Job Submitted. Tracking progress...';
+      checkJobStatus();
+    } else {
+      statusDiv.textContent = 'Error: ' + (data.error || 'Unknown error');
+    }
+  })
+  .catch(err => {
+    statusDiv.textContent = 'Error submitting job: ' + err;
+  });
+});
+
+function checkJobStatus() {
+  if (!currentJobId) return;
+  fetch(`/status/${currentJobId}`)
+    .then(res => res.json())
+    .then(data => {
+      progressDiv.textContent = "Progress: " + data.progress + " | Elapsed: " + data.elapsed;
+      statusDiv.textContent = "Status: " + data.status;
+      if (data.status === "completed") {
+        checkBtn.disabled = false;
+      } else {
+        checkBtn.disabled = true;
+        setTimeout(checkJobStatus, 2000);
+      }
+    });
+}
+
+function updateWorkers() {
+  fetch('/workers')
+    .then(res => res.json())
+    .then(data => {
+      if (data.count === 0) {
+        workersDashboard.innerHTML = '<p style="color: #999;">No active workers detected</p>';
+        return;
+      }
+      let html = `<strong>Active Workers: ${data.count}</strong><br>`;
+      data.workers.forEach(worker => {
+        const lastseenAgo = Math.round((Date.now() / 1000) - worker.lastseen);
+        html += `
+          <div class="worker-item">
+            <span class="worker-status"></span>
+            <strong>${worker.workerid}</strong> on <em>${worker.hostname}</em>
+            <span class="elapsed-time">(seen ${lastseenAgo}s ago)</span>
+          </div>
+        `;
+      });
+      workersDashboard.innerHTML = html;
+    })
+    .catch(err => {
+      workersDashboard.innerHTML = '<p style="color: #dc3545;">Error fetching worker status</p>';
+    });
+}
+
+checkBtn.addEventListener('click', () => {
+  if (!currentJobId) return;
+  fetch(`/result/${currentJobId}`)
+    .then(res => {
+      if (!res.ok) throw new Error('Result not ready');
+      return res.blob();
+    })
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      resultImg.src = url;
+      resultImg.style.display = 'block';
+    })
+    .catch(err => {
+      statusDiv.textContent = 'Error fetching result: ' + err;
+    });
+});
+
+// Update worker status every 5 seconds
+setInterval(updateWorkers, 5000);
+updateWorkers();  // Initial load
+</script>
+
+</body>
+</html>
